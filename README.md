@@ -19,13 +19,15 @@ data/raw/                 # CSVs downloaded from Kaggle (not versioned)
 
 ## Setup
 
+The project uses a conda environment (per the professor's recommendation) that ships with **OpenJDK 17** and **PySpark 3.5**:
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+conda create -n bigdata python=3.13 openjdk=17 -c conda-forge
+conda activate bigdata
 pip install -r requirements.txt
 ```
 
-Java 8/11/17 is required by Spark.
+Always run `conda activate bigdata` before executing anything in this repo — running with a system JDK other than 17 will fail (Spark 3.5/4 does not support newer JDKs).
 
 ## Datasets
 
