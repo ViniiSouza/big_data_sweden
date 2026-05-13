@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+
+# Local datasets (do not version large files)
+data/raw/
+data/processed/
+
+# Spark
+spark-warehouse/
+metastore_db/
+derby.log
