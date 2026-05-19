@@ -6,9 +6,7 @@ venv/
 .vscode/
 .DS_Store
 
-# Local datasets (do not version large files)
-data/raw/
-data/processed/
+
 
 # Spark
 spark-warehouse/
