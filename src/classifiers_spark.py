@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.classification import DecisionTreeClassifier, RandomForestClassifier
 
 from src.split import DEFAULT_SEED
 
@@ -26,6 +26,18 @@ def random_forest() -> RandomForestClassifier:
     )
 
 
+def decision_tree() -> DecisionTreeClassifier:
+    # maxDepth matches random_forest so the comparison isolates the effect of
+    # bagging 100 trees vs a single tree, holding tree capacity constant.
+    return DecisionTreeClassifier(
+        featuresCol="features",
+        labelCol="label",
+        maxDepth=10,
+        seed=DEFAULT_SEED,
+    )
+
+
 CLASSIFIERS: dict[str, Callable[[], object]] = {
     "random_forest": random_forest,
+    "decision_tree": decision_tree,
 }
