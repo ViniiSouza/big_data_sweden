@@ -41,7 +41,8 @@ LOADERS: list[type[DatasetLoader]] = [
 ]
 
 CSV_FIELDS = [
-    "dataset", "classifier", "accuracy", "f1", "train_time_s", "predict_time_s",
+    "dataset", "classifier", "workers", "partitions",
+    "accuracy", "f1", "train_time_s", "predict_time_s", "total_time_s",
 ]
 
 
@@ -49,6 +50,8 @@ def run_all(
     spark: SparkSession,
     dataset_filter: str | None = None,
     classifier_filter: str | None = None,
+    workers: int = 1,
+    partitions: int = 1,
     csv_path: Path | None = None,
 ) -> list[dict]:
     """Run every (dataset, classifier) combination and return metrics rows.
@@ -57,6 +60,13 @@ def run_all(
         spark: active SparkSession.
         dataset_filter: if set, only the loader whose ``info.name`` matches runs.
         classifier_filter: if set, only the matching key from ``CLASSIFIERS`` runs.
+        workers: number of Spark workers in use; recorded in each metrics row
+            for downstream comparison. The caller is responsible for matching
+            this to what was passed to ``get_spark``.
+        partitions: target partition count for the dataset DataFrame after
+            load. Each dataset is ``repartition(partitions)``-ed before
+            features are built, so the parallelism of the whole pipeline
+            (features, split, fit) is bounded by it. Default 1 forces serial.
         csv_path: if set, each metrics row is appended to this CSV as it
             completes (header written first). Survives a mid-run crash.
 
@@ -64,6 +74,8 @@ def run_all(
         List of metrics rows. Each row also gets printed to stdout as it
         completes (streaming progress).
     """
+    if partitions < 1:
+        raise ValueError(f"partitions must be >= 1, got {partitions}")
     if classifier_filter and classifier_filter not in CLASSIFIERS:
         raise ValueError(
             f"unknown classifier {classifier_filter!r}; "
@@ -93,7 +105,7 @@ def run_all(
 
             print(f"\n=== dataset: {ds_name} ({loader.info.size_category}) ===")
             try:
-                df = loader.run()
+                df = loader.run().repartition(partitions)
                 feat_df, _ = build_features(df, target_col=loader.info.target_column)
                 feat_df.persist(StorageLevel.MEMORY_AND_DISK)
                 train_df, test_df = train_test_split(feat_df)
@@ -111,7 +123,15 @@ def run_all(
                         print(f"  [error] {clf_name}: {type(e).__name__}: {e}")
                         continue
 
-                    row = {"dataset": ds_name, "classifier": clf_name, **metrics}
+                    total_time = metrics["train_time_s"] + metrics["predict_time_s"]
+                    row = {
+                        "dataset": ds_name,
+                        "classifier": clf_name,
+                        "workers": workers,
+                        "partitions": partitions,
+                        **metrics,
+                        "total_time_s": total_time,
+                    }
                     rows.append(row)
                     if csv_writer is not None:
                         csv_writer.writerow(row)
@@ -120,7 +140,8 @@ def run_all(
                         f"     acc={metrics['accuracy']:.4f} "
                         f"f1={metrics['f1']:.4f} "
                         f"train={metrics['train_time_s']:.2f}s "
-                        f"predict={metrics['predict_time_s']:.2f}s"
+                        f"predict={metrics['predict_time_s']:.2f}s "
+                        f"total={total_time:.2f}s"
                     )
             finally:
                 feat_df.unpersist()
@@ -136,16 +157,22 @@ def format_table(rows: list[dict]) -> str:
     if not rows:
         return "(no results)"
 
-    headers = ["dataset", "classifier", "accuracy", "f1", "train_s", "predict_s"]
+    headers = [
+        "dataset", "classifier", "workers", "partitions",
+        "accuracy", "f1", "train_s", "predict_s", "total_s",
+    ]
     formatted: list[list[str]] = [headers]
     for r in rows:
         formatted.append([
             r["dataset"],
             r["classifier"],
+            str(r["workers"]),
+            str(r["partitions"]),
             f"{r['accuracy']:.4f}",
             f"{r['f1']:.4f}",
             f"{r['train_time_s']:.2f}",
             f"{r['predict_time_s']:.2f}",
+            f"{r['total_time_s']:.2f}",
         ])
 
     widths = [max(len(row[i]) for row in formatted) for i in range(len(headers))]

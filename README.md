@@ -51,18 +51,93 @@ Each loader exposes the expected `path` in its `info` attribute. Adjust the file
 
 ## How to run
 
-```bash
-# Smoke test — read + normalize + print sample. Default when no subcommand.
-python main.py                                          # all datasets
-python main.py smoke fraud_detection                    # single dataset
+The entry point is `main.py` with two subcommands: `smoke` and `experiments`. If no subcommand is given, `smoke` is the default.
 
-# Experiments — train + evaluate each classifier on each dataset.
-python main.py experiments                              # all combinations
-python main.py experiments --dataset fraud_detection    # filter datasets
-python main.py experiments --classifier random_forest   # filter classifiers
+### `smoke` — validate a dataset loader
+
+Reads + normalizes the dataset(s) and prints schema + 5 sample rows. **No training.** Used while developing each loader's `normalize()`.
+
+```bash
+python main.py                          # all datasets (default subcommand)
+python main.py smoke                    # explicit form, same as above
+python main.py smoke fraud_detection    # single dataset by info.name
 ```
 
-Classifiers are registered in [src/classifiers_spark.py](src/classifiers_spark.py); the hyperparameter choices for `random_forest` are documented in [docs/adr/0001-rf-hyperparameters.md](docs/adr/0001-rf-hyperparameters.md).
+| Argument  | Type     | Default | Description |
+|---|---|---|---|
+| `dataset` | positional, optional | all | Run only the loader whose `info.name` matches (e.g. `gen_z_social`, `fraud_detection`, `lol_matches`, `job_salary`). |
+
+### `experiments` — train and evaluate classifiers
+
+Runs every `(dataset, classifier)` pair, prints metrics per experiment as they complete, writes a CSV, and prints a summary table + a per-classifier time breakdown + the grand wall-clock total at the end.
+
+```bash
+# Defaults: workers=1, partitions=1 (serial baseline), all datasets, all classifiers
+python main.py experiments
+
+# Filter to one dataset
+python main.py experiments --dataset gen_z_social
+
+# Filter to one classifier
+python main.py experiments --classifier random_forest
+
+# Parallelism sweep — increase cores and partitions to measure speedup
+python main.py experiments --workers 4 --partitions 4
+python main.py experiments --workers 8 --partitions 8
+
+# Diagnostic: many cores but a single partition (shows the bottleneck)
+python main.py experiments --workers 8 --partitions 1
+
+# Combine — quick smoke of a single experiment
+python main.py experiments --dataset gen_z_social --classifier naive_bayes --workers 4 --partitions 4
+```
+
+| Flag           | Type | Default | Description |
+|---|---|---|---|
+| `--dataset`    | str  | all     | Filter by dataset `info.name`. Values: `gen_z_social`, `fraud_detection`, `lol_matches`, `job_salary`. |
+| `--classifier` | str  | all     | Filter by classifier name. Values: `random_forest`, `decision_tree`, `naive_bayes`. See [src/classifiers_spark.py](src/classifiers_spark.py). |
+| `--workers`    | int  | `1`     | Spark local executor cores (`local[N]`). Default `1` is the fully serial baseline. |
+| `--partitions` | int  | `1`     | Target partition count for the DataFrame after `load()`, plus the value of `spark.sql.shuffle.partitions`. Default `1` forces no parallelism. |
+
+### Output
+
+`experiments` produces three artifacts per run:
+
+1. **CSV** at `results/experiments_w{workers}_p{partitions}.csv` — one row per `(dataset, classifier)` experiment. Columns: `dataset, classifier, workers, partitions, accuracy, f1, train_time_s, predict_time_s, total_time_s`. Rows are flushed incrementally — a crash mid-run keeps everything that completed.
+2. **Stdout streaming** — one line per experiment as it finishes: `acc=... f1=... train=...s predict=...s total=...s`.
+3. **Summary** at the end:
+   - Table with every completed experiment.
+   - Time spent per classifier (sum of `total_time_s` across datasets), sorted desc.
+   - Grand total wall time (`time.perf_counter()` around the whole loop).
+
+All times are in **seconds** (`time.perf_counter()`).
+
+### Comparison sweep (recommended for the report)
+
+```bash
+python main.py experiments --workers 1 --partitions 1 \
+ && python main.py experiments --workers 4 --partitions 4 \
+ && python main.py experiments --workers 8 --partitions 8
+```
+
+Each run creates its own CSV (`experiments_w1_p1.csv`, `experiments_w4_p4.csv`, `experiments_w8_p8.csv`). To concatenate them for plotting:
+
+```bash
+cd results
+{ head -1 experiments_w1_p1.csv; for f in experiments_w*.csv; do tail -n +2 "$f"; done; } > all_results.csv
+```
+
+### Classifiers
+
+Registered in [src/classifiers_spark.py](src/classifiers_spark.py):
+
+| Name             | Spark estimator              | Notes |
+|---|---|---|
+| `random_forest`  | `RandomForestClassifier`     | `numTrees=100, maxDepth=10, seed=42`. See [docs/adr/0001-rf-hyperparameters.md](docs/adr/0001-rf-hyperparameters.md). |
+| `decision_tree`  | `DecisionTreeClassifier`     | `maxDepth=10, seed=42` — matches RF's depth so the comparison isolates the effect of bagging. |
+| `naive_bayes`    | `NaiveBayes`                 | `modelType="gaussian"` — only mode that accepts the mixed numeric + OHE feature vector. |
+
+Adding a new classifier is one function + one entry in the `CLASSIFIERS` dict; the runner picks it up automatically.
 
 ## Team split
 
