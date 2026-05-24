@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from typing import Callable
 
-from pyspark.ml.classification import DecisionTreeClassifier, RandomForestClassifier
+from pyspark.ml.classification import (
+    DecisionTreeClassifier,
+    NaiveBayes,
+    RandomForestClassifier,
+)
 
 from src.split import DEFAULT_SEED
 
@@ -37,7 +41,20 @@ def decision_tree() -> DecisionTreeClassifier:
     )
 
 
+def naive_bayes() -> NaiveBayes:
+    # modelType="gaussian" accepts any real-valued feature, including the mix
+    # of raw numerics + OHE indicators produced by build_features. The default
+    # "multinomial" would reject negative values and assume features are
+    # count-like, which does not hold for this pipeline.
+    return NaiveBayes(
+        featuresCol="features",
+        labelCol="label",
+        modelType="gaussian",
+    )
+
+
 CLASSIFIERS: dict[str, Callable[[], object]] = {
     "random_forest": random_forest,
     "decision_tree": decision_tree,
+    "naive_bayes": naive_bayes,
 }
