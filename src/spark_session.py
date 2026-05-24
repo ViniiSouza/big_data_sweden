@@ -13,6 +13,6 @@ def get_spark(app_name: str = "BigDataSweden", master: str = "local[*]") -> Spar
         .appName(app_name)
         .master(master)
         .config("spark.sql.shuffle.partitions", "8")
-        .config("spark.driver.memory", "2g")
+        .config("spark.driver.memory", "8g")
         .getOrCreate()
     )

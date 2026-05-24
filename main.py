@@ -1,15 +1,24 @@
-"""Entry point to test reading and normalization of the 4 datasets.
+"""Entry point.
+
+Subcommands:
+    smoke        Read + normalize each dataset, print schema and sample rows.
+                 Used while developing the loaders' normalize().
+    experiments  Train every classifier on every dataset, print metrics.
 
 Usage:
-    python main.py                  # All datasets
-    python main.py fraud_detection  # Single dataset by info.name
+    python main.py                                          # default: smoke, all
+    python main.py smoke fraud_detection                    # smoke, single dataset
+    python main.py experiments                              # all datasets x all classifiers
+    python main.py experiments --dataset fraud_detection    # filter datasets
+    python main.py experiments --classifier random_forest   # filter classifiers
 """
 from __future__ import annotations
 
 import argparse
+import sys
 
 
-def run_spark(selected: str | None) -> None:
+def cmd_smoke(args: argparse.Namespace) -> None:
     from src.datasets import (
         DatasetLoader,
         FraudDetectionLoader,
@@ -31,7 +40,7 @@ def run_spark(selected: str | None) -> None:
 
     for loader_cls in loaders:
         loader = loader_cls(spark)
-        if selected and loader.info.name != selected:
+        if args.dataset and loader.info.name != args.dataset:
             continue
 
         print(f"\n=== {loader.info.name} ({loader.info.size_category}) ===")
@@ -50,17 +59,55 @@ def run_spark(selected: str | None) -> None:
     spark.stop()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "dataset",
-        nargs="?",
-        default=None,
-        help="Optional info.name to run a single loader (e.g. gen_z_social).",
-    )
-    args = parser.parse_args()
+def cmd_experiments(args: argparse.Namespace) -> None:
+    from src.experiments import format_table, run_all
+    from src.spark_session import get_spark
 
-    run_spark(args.dataset)
+    spark = get_spark()
+    spark.sparkContext.setLogLevel("WARN")
+    try:
+        rows = run_all(
+            spark,
+            dataset_filter=args.dataset,
+            classifier_filter=args.classifier,
+        )
+    finally:
+        spark.stop()
+
+    print("\n=== summary ===")
+    print(format_table(rows))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command")
+
+    p_smoke = sub.add_parser("smoke", help="Read + normalize datasets, print samples.")
+    p_smoke.add_argument(
+        "dataset", nargs="?", default=None,
+        help="Optional info.name to run a single loader.",
+    )
+    p_smoke.set_defaults(func=cmd_smoke)
+
+    p_exp = sub.add_parser("experiments", help="Train and evaluate classifiers.")
+    p_exp.add_argument("--dataset", default=None, help="Filter by dataset info.name.")
+    p_exp.add_argument("--classifier", default=None, help="Filter by classifier name.")
+    p_exp.set_defaults(func=cmd_experiments)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    argv = sys.argv[1:] if argv is None else argv
+
+    # Default to "smoke" when no subcommand is given, preserving the historical
+    # `python main.py [dataset]` ergonomics.
+    if not argv or argv[0] not in {"smoke", "experiments", "-h", "--help"}:
+        argv = ["smoke", *argv]
+
+    args = parser.parse_args(argv)
+    args.func(args)
 
 
 if __name__ == "__main__":

@@ -7,13 +7,20 @@ Big Data course project: supervised classification with Spark on datasets of dif
 ```
 src/
   spark_session.py        # Shared SparkSession factory
+  features.py             # build_features (StringIndexer + OHE + VectorAssembler)
+  split.py                # train_test_split (fixed seed)
+  train_spark.py          # train_and_evaluate (fit + transform + metrics)
+  classifiers_spark.py    # CLASSIFIERS registry (random_forest, ...)
+  experiments.py          # run_all loop: datasets x classifiers
   datasets/               # Spark loaders
     base.py               # DatasetLoader (abstract) + DatasetInfo
     gen_z_social.py       # small/medium
     fraud_detection.py    # large
     lol_matches.py        # large
     job_salary.py         # small/medium
-main.py                   # Reads and normalizes every dataset
+main.py                   # CLI dispatcher: smoke | experiments
+docs/adr/                 # Architecture Decision Records
+CONTEXT.md                # Project glossary
 data/raw/                 # CSVs downloaded from Kaggle (not versioned)
 ```
 
@@ -45,9 +52,17 @@ Each loader exposes the expected `path` in its `info` attribute. Adjust the file
 ## How to run
 
 ```bash
-python main.py                  # All datasets
-python main.py fraud_detection  # A single dataset by info.name
+# Smoke test — read + normalize + print sample. Default when no subcommand.
+python main.py                                          # all datasets
+python main.py smoke fraud_detection                    # single dataset
+
+# Experiments — train + evaluate each classifier on each dataset.
+python main.py experiments                              # all combinations
+python main.py experiments --dataset fraud_detection    # filter datasets
+python main.py experiments --classifier random_forest   # filter classifiers
 ```
+
+Classifiers are registered in [src/classifiers_spark.py](src/classifiers_spark.py); the hyperparameter choices for `random_forest` are documented in [docs/adr/0001-rf-hyperparameters.md](docs/adr/0001-rf-hyperparameters.md).
 
 ## Team split
 
