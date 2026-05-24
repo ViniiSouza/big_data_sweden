@@ -60,8 +60,12 @@ def cmd_smoke(args: argparse.Namespace) -> None:
 
 
 def cmd_experiments(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
     from src.experiments import format_table, run_all
     from src.spark_session import get_spark
+
+    csv_path = Path("results/experiments.csv")
 
     spark = get_spark()
     spark.sparkContext.setLogLevel("WARN")
@@ -70,12 +74,14 @@ def cmd_experiments(args: argparse.Namespace) -> None:
             spark,
             dataset_filter=args.dataset,
             classifier_filter=args.classifier,
+            csv_path=csv_path,
         )
     finally:
         spark.stop()
 
     print("\n=== summary ===")
     print(format_table(rows))
+    print(f"\nresults written to {csv_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:

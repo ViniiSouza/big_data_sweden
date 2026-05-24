@@ -14,3 +14,6 @@ data/processed/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# Experiment outputs
+results/

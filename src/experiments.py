@@ -15,6 +15,9 @@ moves on. Partial results are still useful for the report.
 """
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+
 from pyspark.sql import SparkSession
 from pyspark.storagelevel import StorageLevel
 
@@ -37,11 +40,16 @@ LOADERS: list[type[DatasetLoader]] = [
     JobSalaryLoader,
 ]
 
+CSV_FIELDS = [
+    "dataset", "classifier", "accuracy", "f1", "train_time_s", "predict_time_s",
+]
+
 
 def run_all(
     spark: SparkSession,
     dataset_filter: str | None = None,
     classifier_filter: str | None = None,
+    csv_path: Path | None = None,
 ) -> list[dict]:
     """Run every (dataset, classifier) combination and return metrics rows.
 
@@ -49,6 +57,8 @@ def run_all(
         spark: active SparkSession.
         dataset_filter: if set, only the loader whose ``info.name`` matches runs.
         classifier_filter: if set, only the matching key from ``CLASSIFIERS`` runs.
+        csv_path: if set, each metrics row is appended to this CSV as it
+            completes (header written first). Survives a mid-run crash.
 
     Returns:
         List of metrics rows. Each row also gets printed to stdout as it
@@ -64,43 +74,59 @@ def run_all(
         [classifier_filter] if classifier_filter else list(CLASSIFIERS)
     )
 
+    csv_file = None
+    csv_writer = None
+    if csv_path is not None:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        csv_file = csv_path.open("w", newline="")
+        csv_writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
+        csv_writer.writeheader()
+        csv_file.flush()
+
     rows: list[dict] = []
-    for loader_cls in LOADERS:
-        loader = loader_cls(spark)
-        ds_name = loader.info.name
-        if dataset_filter and ds_name != dataset_filter:
-            continue
+    try:
+        for loader_cls in LOADERS:
+            loader = loader_cls(spark)
+            ds_name = loader.info.name
+            if dataset_filter and ds_name != dataset_filter:
+                continue
 
-        print(f"\n=== dataset: {ds_name} ({loader.info.size_category}) ===")
-        try:
-            df = loader.run()
-            feat_df, _ = build_features(df, target_col=loader.info.target_column)
-            feat_df.persist(StorageLevel.MEMORY_AND_DISK)
-            train_df, test_df = train_test_split(feat_df)
-        except Exception as e:
-            print(f"[error] dataset {ds_name}: {type(e).__name__}: {e}")
-            continue
+            print(f"\n=== dataset: {ds_name} ({loader.info.size_category}) ===")
+            try:
+                df = loader.run()
+                feat_df, _ = build_features(df, target_col=loader.info.target_column)
+                feat_df.persist(StorageLevel.MEMORY_AND_DISK)
+                train_df, test_df = train_test_split(feat_df)
+            except Exception as e:
+                print(f"[error] dataset {ds_name}: {type(e).__name__}: {e}")
+                continue
 
-        try:
-            for clf_name in classifier_names:
-                clf = CLASSIFIERS[clf_name]()
-                print(f"  -> {clf_name} ...", flush=True)
-                try:
-                    metrics = train_and_evaluate(train_df, test_df, clf)
-                except Exception as e:
-                    print(f"  [error] {clf_name}: {type(e).__name__}: {e}")
-                    continue
+            try:
+                for clf_name in classifier_names:
+                    clf = CLASSIFIERS[clf_name]()
+                    print(f"  -> {clf_name} ...", flush=True)
+                    try:
+                        metrics = train_and_evaluate(train_df, test_df, clf)
+                    except Exception as e:
+                        print(f"  [error] {clf_name}: {type(e).__name__}: {e}")
+                        continue
 
-                row = {"dataset": ds_name, "classifier": clf_name, **metrics}
-                rows.append(row)
-                print(
-                    f"     acc={metrics['accuracy']:.4f} "
-                    f"f1={metrics['f1']:.4f} "
-                    f"train={metrics['train_time_s']:.2f}s "
-                    f"predict={metrics['predict_time_s']:.2f}s"
-                )
-        finally:
-            feat_df.unpersist()
+                    row = {"dataset": ds_name, "classifier": clf_name, **metrics}
+                    rows.append(row)
+                    if csv_writer is not None:
+                        csv_writer.writerow(row)
+                        csv_file.flush()
+                    print(
+                        f"     acc={metrics['accuracy']:.4f} "
+                        f"f1={metrics['f1']:.4f} "
+                        f"train={metrics['train_time_s']:.2f}s "
+                        f"predict={metrics['predict_time_s']:.2f}s"
+                    )
+            finally:
+                feat_df.unpersist()
+    finally:
+        if csv_file is not None:
+            csv_file.close()
 
     return rows
 
