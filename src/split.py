@@ -1,9 +1,5 @@
 """Shared train/test split.
 
-Centralizing the split keeps every experiment comparable: baseline (pandas /
-sklearn) and Spark always train and evaluate on the same rows, with the same
-seed and ratio.
-
 Notes:
     Spark's ``randomSplit`` is a plain random split, not stratified. For our
     datasets (3-class targets with reasonably balanced classes) this is enough.
