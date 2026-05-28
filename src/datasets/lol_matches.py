@@ -115,12 +115,18 @@ class LolMatchesLoader(DatasetLoader):
             df = df.withColumn(col, F.col(col).cast(IntegerType()))
         for col in long_cols:
             df = df.withColumn(col, F.col(col).cast(LongType()))
-        for col in long_cols:
+        for col in double_cols:
             df = df.withColumn(col, F.col(col).cast(DoubleType()))
         for col in string_cols + [target]:
             df = df.withColumn(col, F.trim(F.col(col).cast("string")))
 
-        df = df.dropna(subset=[target])
-        df = df.filter(F.col(target).isin([True, False]))
+        df = df.withColumn(
+            target,
+            F.when(F.col(target).isNull() | (F.col(target) == "NULL") | (F.col(target) == ""), "0")
+            .otherwise(F.col(target))
+        )
+
+        df = df.filter(F.col(target).isin(["1", "0"]))
+        
 
         return df.select(*string_cols, *long_cols, *integer_cols, *double_cols, target)
